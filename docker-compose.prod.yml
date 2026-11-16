@@ -1,0 +1,49 @@
+# Dùng trên server production: KHÔNG build, chỉ pull image đã build sẵn từ registry (GHCR).
+# Chạy: IMAGE_OWNER=<github-user> TAG=v1.0.0 docker compose -f docker-compose.prod.yml up -d
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    networks: [backend-net]          # không publish port 5432 ra ngoài
+
+  backend:
+    image: ghcr.io/${IMAGE_OWNER:?set IMAGE_OWNER}/shop-backend:${TAG:-latest}
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
+      CORS_ORIGIN: ${CORS_ORIGIN:-*}
+    depends_on:
+      db:
+        condition: service_healthy
+    command: sh -c "node src/db/migrate.js && node src/server.js"
+    restart: unless-stopped
+    networks: [backend-net, frontend-net]
+
+  frontend:
+    image: ghcr.io/${IMAGE_OWNER:?set IMAGE_OWNER}/shop-frontend:${TAG:-latest}
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks: [frontend-net]
+
+volumes:
+  pgdata:
+
+networks:
+  backend-net:
+  frontend-net:

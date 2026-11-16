@@ -1,0 +1,51 @@
+# Môi trường chạy local: build image từ source.
+# Chạy: docker compose up --build
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-shop}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-shop}
+      POSTGRES_DB: ${POSTGRES_DB:-shop}
+    volumes:
+      - pgdata:/var/lib/postgresql/data   # giữ dữ liệu khi xóa container
+    ports:
+      - "5432:5432"                       # mở để dùng psql/DBeaver từ máy host (production nên bỏ)
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-shop} -d ${POSTGRES_DB:-shop}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [backend-net]
+
+  backend:
+    build: ./backend
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgres://${POSTGRES_USER:-shop}:${POSTGRES_PASSWORD:-shop}@db:5432/${POSTGRES_DB:-shop}
+      JWT_SECRET: ${JWT_SECRET:-local-dev-secret-not-for-prod}
+      CORS_ORIGIN: ${CORS_ORIGIN:-*}
+    depends_on:
+      db:
+        condition: service_healthy        # chờ DB sẵn sàng rồi mới chạy
+    # Chạy migration trước khi bật server
+    command: sh -c "node src/db/migrate.js && node src/server.js"
+    restart: unless-stopped
+    networks: [backend-net, frontend-net]
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks: [frontend-net]
+
+volumes:
+  pgdata:
+
+networks:
+  backend-net:
+  frontend-net:
